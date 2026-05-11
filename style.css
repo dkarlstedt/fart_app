@@ -1,0 +1,81 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #0d0d0d;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 36px;
+}
+
+#butthole {
+  width: min(72vw, 72vh);
+  height: min(72vw, 72vh);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  display: block;
+}
+
+.petal {
+  pointer-events: fill;
+  cursor: grab;
+  transition: opacity 0.1s;
+}
+
+.petal:active {
+  cursor: grabbing;
+}
+
+.handle {
+  cursor: grab;
+}
+
+.handle.dragging {
+  cursor: grabbing;
+}
+
+#play-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid #2a2a2a;
+  background: #171717;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.08s, opacity 0.2s;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#play-btn:hover {
+  background: #1f1f1f;
+  box-shadow: 0 0 16px rgba(192, 57, 43, 0.25);
+}
+
+#play-btn:active {
+  transform: scale(0.92);
+}
+
+#play-btn.playing {
+  opacity: 0.3;
+  pointer-events: none;
+}
