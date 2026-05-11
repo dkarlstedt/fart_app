@@ -4,14 +4,14 @@
   padding: 0;
 }
 
-html, body {
-  width: 100%;
+html {
   height: 100%;
-  background: #0d0d0d;
-  overflow: hidden;
 }
 
 body {
+  height: 100dvh;
+  background: #0d0d0d;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -21,26 +21,31 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 36px;
+  gap: 32px;
 }
 
 #butthole {
-  width: min(72vw, 72vh);
-  height: min(72vw, 72vh);
+  width: min(65vw, 65vh);
+  height: min(65vw, 65vh);
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   display: block;
 }
 
-.petal {
+.segment {
   pointer-events: fill;
   cursor: grab;
-  transition: opacity 0.1s;
 }
 
-.petal:active {
+.segment:active {
   cursor: grabbing;
+}
+
+.crease {
+  pointer-events: none;
+  fill: #1A0504;
+  opacity: 0.72;
 }
 
 .handle {
@@ -64,6 +69,7 @@ body {
   transition: background 0.15s, box-shadow 0.15s, transform 0.08s, opacity 0.2s;
   outline: none;
   -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
 }
 
 #play-btn:hover {

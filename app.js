@@ -2,10 +2,11 @@
 
 const CX = 200;
 const CY = 200;
-const REST_RADIUS = 52;
-const MAX_RADIUS = 130;
-const NUM_PETALS = 8;
-const PETAL_HALF_WIDTH = 16;
+const REST_RADIUS = 55;
+const MAX_RADIUS = 135;
+const NUM_PETALS = 12;
+const INNER_R_MIN = 16;
+const INNER_R_MAX = 38;
 
 const state = {
   handles: [],
@@ -26,54 +27,104 @@ function initHandles() {
   });
 }
 
-// Leaf-shaped cubic bezier petal from center to tip and back
-function buildPetalPath(cx, cy, tipX, tipY, halfWidth) {
-  const dx = tipX - cx;
-  const dy = tipY - cy;
-  const len = Math.hypot(dx, dy);
-  if (len < 1) return `M ${cx} ${cy} Z`;
+// ─── Geometry ─────────────────────────────────────────────────────────────────
 
-  const ux = dx / len;
-  const uy = dy / len;
-  const px = -uy;
-  const py = ux;
+// Rounded sector shape: narrow inner arc → two bowed sides → rounded outer arc.
+// 12 of these form a continuous ring of flesh folds.
+function buildRidgePath(cx, cy, dist, theta, innerR, N) {
+  // Angular half-widths: inner is wider than outer (taper toward tip)
+  const innerHalfAng = (Math.PI / N) * 0.75;
+  const outerHalfAng = (Math.PI / N) * 0.58;
 
-  const flare = halfWidth * 1.7;
-  const cp1x = cx + px * flare + ux * len * 0.25;
-  const cp1y = cy + py * flare + uy * len * 0.25;
-  const cp2x = tipX + px * halfWidth * 0.3;
-  const cp2y = tipY + py * halfWidth * 0.3;
-  const cp3x = tipX - px * halfWidth * 0.3;
-  const cp3y = tipY - py * halfWidth * 0.3;
-  const cp4x = cx - px * flare + ux * len * 0.25;
-  const cp4y = cy - py * flare + uy * len * 0.25;
+  const ia1 = theta - innerHalfAng;
+  const ia2 = theta + innerHalfAng;
+  const oa1 = theta - outerHalfAng;
+  const oa2 = theta + outerHalfAng;
+
+  const ix1 = cx + Math.cos(ia1) * innerR,  iy1 = cy + Math.sin(ia1) * innerR;
+  const ix2 = cx + Math.cos(ia2) * innerR,  iy2 = cy + Math.sin(ia2) * innerR;
+  const ox1 = cx + Math.cos(oa1) * dist,    oy1 = cy + Math.sin(oa1) * dist;
+  const ox2 = cx + Math.cos(oa2) * dist,    oy2 = cy + Math.sin(oa2) * dist;
+
+  // Q bezier control points bow the sides slightly outward for organic flare
+  const midR = (innerR + dist) * 0.52;
+  const mc1x = cx + Math.cos((ia1 + oa1) / 2 - 0.06) * midR;
+  const mc1y = cy + Math.sin((ia1 + oa1) / 2 - 0.06) * midR;
+  const mc2x = cx + Math.cos((ia2 + oa2) / 2 + 0.06) * midR;
+  const mc2y = cy + Math.sin((ia2 + oa2) / 2 + 0.06) * midR;
 
   return [
-    `M ${cx} ${cy}`,
-    `C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${tipX} ${tipY}`,
-    `C ${cp3x} ${cp3y} ${cp4x} ${cp4y} ${cx} ${cy}`,
+    `M ${ix1} ${iy1}`,
+    `A ${innerR} ${innerR} 0 0 1 ${ix2} ${iy2}`,   // inner arc CW
+    `Q ${mc2x} ${mc2y} ${ox2} ${oy2}`,              // right side (bowed out)
+    `A ${dist} ${dist} 0 0 0 ${ox1} ${oy1}`,        // outer arc CCW (rounded tip)
+    `Q ${mc1x} ${mc1y} ${ix1} ${iy1}`,              // left side (bowed out)
     'Z',
   ].join(' ');
 }
 
-function updateAllPetals() {
-  const petals = document.querySelectorAll('.petal');
-  const handles = document.querySelectorAll('.handle');
-  const wrinkles = document.querySelectorAll('.wrinkle');
+// Dark tapering valley between adjacent ridges — narrow at center, wider at edge.
+function buildCreasePath(cx, cy, dist, theta, N) {
+  const innerR = 8;
+  const innerW = 1.8;
+  const outerW = dist * 0.42 * (Math.PI / N); // matches the angular gap between ridges
+
+  const px = -Math.sin(theta);
+  const py =  Math.cos(theta);
+
+  const ix = cx + Math.cos(theta) * innerR;
+  const iy = cy + Math.sin(theta) * innerR;
+  const ox = cx + Math.cos(theta) * dist;
+  const oy = cy + Math.sin(theta) * dist;
+
+  const midR = (innerR + dist) * 0.5;
+  const midW = (innerW + outerW) * 0.5;
+  const mx = cx + Math.cos(theta) * midR;
+  const my = cy + Math.sin(theta) * midR;
+
+  return [
+    `M ${ix - px * innerW} ${iy - py * innerW}`,
+    `Q ${mx - px * midW} ${my - py * midW} ${ox - px * outerW} ${oy - py * outerW}`,
+    `A ${dist} ${dist} 0 0 1 ${ox + px * outerW} ${oy + py * outerW}`,
+    `Q ${mx + px * midW} ${my + py * midW} ${ix + px * innerW} ${iy + py * innerW}`,
+    'Z',
+  ].join(' ');
+}
+
+function updateShape() {
+  const segments = document.querySelectorAll('.segment');
+  const creases  = document.querySelectorAll('.crease');
+  const handles  = document.querySelectorAll('.handle');
+  const opening  = document.getElementById('center-opening');
+  const ring     = document.getElementById('inner-ring');
+
+  const pulls = state.handles.map(h => {
+    const d = Math.hypot(h.x - CX, h.y - CY);
+    return Math.max(0, Math.min(1, (d - REST_RADIUS) / (MAX_RADIUS - REST_RADIUS)));
+  });
+  const avgPull = pulls.reduce((a, b) => a + b, 0) / NUM_PETALS;
+  const innerR = INNER_R_MIN + avgPull * (INNER_R_MAX - INNER_R_MIN);
 
   state.handles.forEach((h, i) => {
-    petals[i].setAttribute('d', buildPetalPath(CX, CY, h.x, h.y, PETAL_HALF_WIDTH));
+    const dist = Math.hypot(h.x - CX, h.y - CY);
+
+    segments[i].setAttribute('d', buildRidgePath(CX, CY, dist, h.theta, innerR, NUM_PETALS));
     handles[i].setAttribute('cx', h.x);
     handles[i].setAttribute('cy', h.y);
 
-    // Wrinkle line sits between this petal and the next one
+    // Crease sits at the midpoint angle between this ridge and the next
+    const nextH = state.handles[(i + 1) % NUM_PETALS];
+    const nextDist = Math.hypot(nextH.x - CX, nextH.y - CY);
+    const avgDist = (dist + nextDist) / 2;
     const midTheta = h.theta + Math.PI / NUM_PETALS;
-    wrinkles[i].setAttribute('x1', CX + Math.cos(midTheta) * 15);
-    wrinkles[i].setAttribute('y1', CY + Math.sin(midTheta) * 15);
-    wrinkles[i].setAttribute('x2', CX + Math.cos(midTheta) * (REST_RADIUS * 0.88));
-    wrinkles[i].setAttribute('y2', CY + Math.sin(midTheta) * (REST_RADIUS * 0.88));
+    creases[i].setAttribute('d', buildCreasePath(CX, CY, avgDist, midTheta, NUM_PETALS));
   });
+
+  opening.setAttribute('r', innerR);
+  ring.setAttribute('r', innerR);
 }
+
+// ─── Coordinate conversion ────────────────────────────────────────────────────
 
 function clientToSVG(clientX, clientY) {
   const svg = document.getElementById('butthole');
@@ -82,6 +133,8 @@ function clientToSVG(clientX, clientY) {
   pt.y = clientY;
   return pt.matrixTransform(svg.getScreenCTM().inverse());
 }
+
+// ─── Drag ─────────────────────────────────────────────────────────────────────
 
 function startDrag(index) {
   state.drag = { index };
@@ -94,13 +147,12 @@ function moveDrag(clientX, clientY) {
   const svgPt = clientToSVG(clientX, clientY);
   const theta = state.handles[index].theta;
 
-  // Project cursor onto this handle's radial ray from center
   const projection = (svgPt.x - CX) * Math.cos(theta) + (svgPt.y - CY) * Math.sin(theta);
   const dist = Math.max(REST_RADIUS, Math.min(MAX_RADIUS, projection));
 
   state.handles[index].x = CX + Math.cos(theta) * dist;
   state.handles[index].y = CY + Math.sin(theta) * dist;
-  updateAllPetals();
+  updateShape();
 }
 
 function endDrag() {
@@ -128,13 +180,13 @@ function computeShapeMetrics() {
 
 function computeAudioFromShape({ avgPull, maxPull, asymmetry, tension }) {
   return {
-    filterFreq: 80 + tension * 220,        // tight=300Hz, loose=80Hz
-    filterQ: 1.0 + asymmetry * 4.0,        // symmetric=narrow, asymmetric=wide resonance
-    lfoRate: 28 - avgPull * 16,            // open=12Hz (slow flutter), tight=28Hz (fast flutter)
-    lfoDepth: 0.4 + asymmetry * 0.5,       // asymmetric = wetter = deeper flutter
-    masterVolume: 0.35 + avgPull * 0.55,   // 0.35–0.9
-    duration: 0.3 + avgPull * 1.4,         // 0.3s–1.7s
-    attackTime: 0.01 + (1 - maxPull) * 0.03,
+    filterFreq:   80 + tension * 220,
+    filterQ:       1.0 + asymmetry * 4.0,
+    lfoRate:      28 - avgPull * 16,
+    lfoDepth:      0.4 + asymmetry * 0.5,
+    masterVolume:  0.35 + avgPull * 0.55,
+    duration:      0.3 + avgPull * 1.4,
+    attackTime:    0.01 + (1 - maxPull) * 0.03,
   };
 }
 
@@ -154,7 +206,6 @@ function createBrownNoise(audioCtx, durationSeconds) {
   return buffer;
 }
 
-// Tanh-style soft-clip curve for grit/saturation
 function createWaveShaperCurve(amount = 80) {
   const n = 256;
   const curve = new Float32Array(n);
@@ -165,7 +216,7 @@ function createWaveShaperCurve(amount = 80) {
   return curve;
 }
 
-// surfacePreset: future hook for reverb/surface modifiers (e.g. { filterQ: 5, lfoRate: 8 })
+// surfacePreset: future hook — e.g. { filterQ: 5, lfoRate: 8 } for "hot tub"
 function playFart(surfacePreset = {}) {
   if (state.isPlaying) return;
 
@@ -183,7 +234,6 @@ function playFart(surfacePreset = {}) {
   const t0 = ctx.currentTime + 0.02;
   const { duration, attackTime, filterFreq, filterQ, lfoRate, lfoDepth, masterVolume } = params;
 
-  // Brown noise source — turbulent air
   const noiseBuffer = createBrownNoise(ctx, duration);
   const noiseSource = ctx.createBufferSource();
   noiseSource.buffer = noiseBuffer;
@@ -197,7 +247,6 @@ function playFart(surfacePreset = {}) {
   const noiseGain = ctx.createGain();
   noiseGain.gain.value = 0.5;
 
-  // Sawtooth oscillator — sphincter buzz (like a lip trill)
   const buzzOsc = ctx.createOscillator();
   buzzOsc.type = 'sawtooth';
   buzzOsc.frequency.setValueAtTime(filterFreq * 0.65, t0);
@@ -212,30 +261,26 @@ function playFart(surfacePreset = {}) {
   const buzzGain = ctx.createGain();
   buzzGain.gain.value = 0.35;
 
-  // Soft-clip waveshaper — adds harmonic grit
   const waveshaper = ctx.createWaveShaper();
   waveshaper.curve = createWaveShaperCurve(80);
   waveshaper.oversample = '2x';
 
-  // LFO for rapid amplitude flutter — creates "brrrt" texture
   const lfo = ctx.createOscillator();
   lfo.type = 'sine';
-  lfo.frequency.value = lfoRate + (Math.random() * 4 - 2); // slight randomness each fart
+  lfo.frequency.value = lfoRate + (Math.random() * 4 - 2);
 
   const lfoDepthGain = ctx.createGain();
   lfoDepthGain.gain.value = lfoDepth;
 
   const flutterGain = ctx.createGain();
-  flutterGain.gain.value = 1 - lfoDepth * 0.8; // DC offset so LFO sweeps from ~0 to 1
+  flutterGain.gain.value = 1 - lfoDepth * 0.8;
 
-  // Amplitude envelope
   const envelope = ctx.createGain();
   envelope.gain.setValueAtTime(0, t0);
   envelope.gain.linearRampToValueAtTime(1.0, t0 + attackTime);
   envelope.gain.setValueAtTime(1.0, t0 + attackTime + 0.05);
   envelope.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
 
-  // Compressor — transparent limiting to prevent clipping
   const compressor = ctx.createDynamicsCompressor();
   compressor.threshold.value = -8;
   compressor.knee.value = 6;
@@ -246,7 +291,6 @@ function playFart(surfacePreset = {}) {
   const master = ctx.createGain();
   master.gain.value = masterVolume;
 
-  // Signal graph
   noiseSource.connect(noiseFilter);
   noiseFilter.connect(noiseGain);
   noiseGain.connect(waveshaper);
@@ -291,7 +335,7 @@ function resetAnimation() {
   state.resetTimer = setInterval(() => {
     step++;
     const t = step / steps;
-    const ease = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    const ease = 1 - Math.pow(1 - t, 3);
 
     state.handles.forEach((h, i) => {
       const restX = CX + Math.cos(h.theta) * REST_RADIUS;
@@ -300,7 +344,7 @@ function resetAnimation() {
       h.y = startPositions[i].y + (restY - startPositions[i].y) * ease;
     });
 
-    updateAllPetals();
+    updateShape();
 
     if (step >= steps) {
       clearInterval(state.resetTimer);
@@ -317,15 +361,14 @@ function updatePlayButton() {
 
 function init() {
   initHandles();
-  updateAllPetals();
+  updateShape();
 
   const svg = document.getElementById('butthole');
 
-  // Pointerdown on handle or petal — both trigger drag
   svg.addEventListener('pointerdown', e => {
-    const isHandle = e.target.classList.contains('handle');
-    const isPetal = e.target.classList.contains('petal');
-    if (!isHandle && !isPetal) return;
+    const isHandle  = e.target.classList.contains('handle');
+    const isSegment = e.target.classList.contains('segment');
+    if (!isHandle && !isSegment) return;
     e.preventDefault();
     const index = parseInt(e.target.dataset.index, 10);
     e.target.setPointerCapture(e.pointerId);
@@ -338,7 +381,7 @@ function init() {
     moveDrag(e.clientX, e.clientY);
   });
 
-  svg.addEventListener('pointerup', () => endDrag());
+  svg.addEventListener('pointerup',     () => endDrag());
   svg.addEventListener('pointercancel', () => endDrag());
 
   document.getElementById('play-btn').addEventListener('click', () => playFart());
