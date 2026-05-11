@@ -2,11 +2,12 @@
 
 const CX = 200;
 const CY = 200;
-const REST_RADIUS = 55;
-const MAX_RADIUS = 135;
+const REST_RADIUS = 58;
+const MAX_RADIUS = 138;
 const NUM_PETALS = 12;
-const INNER_R_MIN = 16;
-const INNER_R_MAX = 38;
+const INNER_R_MIN = 14;
+const INNER_R_MAX = 40;
+const DISC_RADIUS = 148;
 
 const state = {
   handles: [],
@@ -14,11 +15,13 @@ const state = {
   isPlaying: false,
   audioCtx: null,
   resetTimer: null,
+  ctx: null,
 };
 
 function initHandles() {
   state.handles = Array.from({ length: NUM_PETALS }, (_, i) => {
-    const theta = (i / NUM_PETALS) * Math.PI * 2 - Math.PI / 2;
+    let theta = (i / NUM_PETALS) * Math.PI * 2 - Math.PI / 2;
+    if (theta > Math.PI) theta -= 2 * Math.PI;
     return {
       x: CX + Math.cos(theta) * REST_RADIUS,
       y: CY + Math.sin(theta) * REST_RADIUS,
@@ -27,187 +30,199 @@ function initHandles() {
   });
 }
 
-// ─── Geometry ──────────────────────────────────────────────────────────────────────────
+function drawCrease(ctx, theta, dist, innerR) {
+  const startR = innerR;
+  const innerW = 2.8;
+  const outerW = Math.max(5.5, dist * 0.13);
 
-// Rounded sector shape: narrow inner arc → two bowed sides → rounded outer arc.
-// 12 of these form a continuous ring of flesh folds.
-function buildRidgePath(cx, cy, dist, theta, innerR, N) {
-  const innerHalfAng = (Math.PI / N) * 0.75;
-  const outerHalfAng = (Math.PI / N) * 0.58;
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(theta);
 
-  const ia1 = theta - innerHalfAng;
-  const ia2 = theta + innerHalfAng;
-  const oa1 = theta - outerHalfAng;
-  const oa2 = theta + outerHalfAng;
+  ctx.beginPath();
+  ctx.moveTo(startR, -innerW);
+  ctx.bezierCurveTo(dist * 0.45, -innerW * 1.1, dist * 0.82, -outerW, dist, -outerW);
+  ctx.arc(dist, 0, outerW, -Math.PI / 2, Math.PI / 2);
+  ctx.bezierCurveTo(dist * 0.82, outerW, dist * 0.45, innerW * 1.1, startR, innerW);
+  ctx.closePath();
 
-  const ix1 = cx + Math.cos(ia1) * innerR,  iy1 = cy + Math.sin(ia1) * innerR;
-  const ix2 = cx + Math.cos(ia2) * innerR,  iy2 = cy + Math.sin(ia2) * innerR;
-  const ox1 = cx + Math.cos(oa1) * dist,    oy1 = cy + Math.sin(oa1) * dist;
-  const ox2 = cx + Math.cos(oa2) * dist,    oy2 = cy + Math.sin(oa2) * dist;
+  const grad = ctx.createLinearGradient(startR, 0, dist, 0);
+  grad.addColorStop(0,    'rgba(2,  0,  0, 0.97)');
+  grad.addColorStop(0.28, 'rgba(8,  2,  1, 0.88)');
+  grad.addColorStop(0.60, 'rgba(16, 5,  2, 0.62)');
+  grad.addColorStop(1,    'rgba(26, 8,  4, 0.12)');
 
-  const midR = (innerR + dist) * 0.52;
-  const mc1x = cx + Math.cos((ia1 + oa1) / 2 - 0.06) * midR;
-  const mc1y = cy + Math.sin((ia1 + oa1) / 2 - 0.06) * midR;
-  const mc2x = cx + Math.cos((ia2 + oa2) / 2 + 0.06) * midR;
-  const mc2y = cy + Math.sin((ia2 + oa2) / 2 + 0.06) * midR;
-
-  return [
-    `M ${ix1} ${iy1}`,
-    `A ${innerR} ${innerR} 0 0 1 ${ix2} ${iy2}`,
-    `Q ${mc2x} ${mc2y} ${ox2} ${oy2}`,
-    `A ${dist} ${dist} 0 0 0 ${ox1} ${oy1}`,
-    `Q ${mc1x} ${mc1y} ${ix1} ${iy1}`,
-    'Z',
-  ].join(' ');
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur  = 9;
+  ctx.fillStyle   = grad;
+  ctx.fill();
+  ctx.restore();
 }
 
-// Dark tapering valley between adjacent ridges.
-function buildCreasePath(cx, cy, dist, theta, N) {
-  const innerR = 8;
-  const innerW = 1.8;
-  const outerW = dist * 0.42 * (Math.PI / N);
+function drawOpening(ctx, innerR) {
+  const ambient = ctx.createRadialGradient(CX, CY, innerR * 0.15, CX, CY, innerR * 2.6);
+  ambient.addColorStop(0,   'rgba(0,0,0,0.88)');
+  ambient.addColorStop(0.4, 'rgba(0,0,0,0.58)');
+  ambient.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, innerR * 2.6, 0, Math.PI * 2);
+  ctx.fillStyle = ambient;
+  ctx.fill();
 
-  const px = -Math.sin(theta);
-  const py =  Math.cos(theta);
-
-  const ix = cx + Math.cos(theta) * innerR;
-  const iy = cy + Math.sin(theta) * innerR;
-  const ox = cx + Math.cos(theta) * dist;
-  const oy = cy + Math.sin(theta) * dist;
-
-  const midR = (innerR + dist) * 0.5;
-  const midW = (innerW + outerW) * 0.5;
-  const mx = cx + Math.cos(theta) * midR;
-  const my = cy + Math.sin(theta) * midR;
-
-  return [
-    `M ${ix - px * innerW} ${iy - py * innerW}`,
-    `Q ${mx - px * midW} ${my - py * midW} ${ox - px * outerW} ${oy - py * outerW}`,
-    `A ${dist} ${dist} 0 0 1 ${ox + px * outerW} ${oy + py * outerW}`,
-    `Q ${mx + px * midW} ${my + py * midW} ${ix + px * innerW} ${iy + py * innerW}`,
-    'Z',
-  ].join(' ');
+  const hole = ctx.createRadialGradient(CX, CY, 0, CX, CY, innerR);
+  hole.addColorStop(0,   '#010101');
+  hole.addColorStop(0.6, '#0A0202');
+  hole.addColorStop(1,   '#2D0806');
+  ctx.beginPath();
+  ctx.arc(CX, CY, innerR, 0, Math.PI * 2);
+  ctx.fillStyle = hole;
+  ctx.fill();
 }
 
-function updateShape() {
-  const segments = document.querySelectorAll('.segment');
-  const creases  = document.querySelectorAll('.crease');
-  const handles  = document.querySelectorAll('.handle');
-  const opening  = document.getElementById('center-opening');
-  const ring     = document.getElementById('inner-ring');
+function render() {
+  const ctx = state.ctx;
+  ctx.clearRect(0, 0, 400, 400);
 
   const pulls = state.handles.map(h => {
     const d = Math.hypot(h.x - CX, h.y - CY);
     return Math.max(0, Math.min(1, (d - REST_RADIUS) / (MAX_RADIUS - REST_RADIUS)));
   });
   const avgPull = pulls.reduce((a, b) => a + b, 0) / NUM_PETALS;
-  const innerR = INNER_R_MIN + avgPull * (INNER_R_MAX - INNER_R_MIN);
+  const innerR  = INNER_R_MIN + avgPull * (INNER_R_MAX - INNER_R_MIN);
+
+  ctx.save();
+  ctx.shadowColor   = 'rgba(0,0,0,0.95)';
+  ctx.shadowBlur    = 38;
+  ctx.shadowOffsetY = 7;
+  ctx.beginPath();
+  ctx.arc(CX, CY, DISC_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = '#1A0504';
+  ctx.fill();
+  ctx.restore();
+
+  const skin = ctx.createRadialGradient(CX, CY, 2, CX, CY, DISC_RADIUS);
+  skin.addColorStop(0,    '#2D0A06');
+  skin.addColorStop(0.18, '#6B2516');
+  skin.addColorStop(0.50, '#9B4535');
+  skin.addColorStop(0.82, '#C06050');
+  skin.addColorStop(1,    '#CC7868');
+  ctx.beginPath();
+  ctx.arc(CX, CY, DISC_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = skin;
+  ctx.fill();
+
+  const light = ctx.createRadialGradient(CX - 30, CY - 40, 0, CX, CY, DISC_RADIUS);
+  light.addColorStop(0,    'rgba(255,210,170,0.10)');
+  light.addColorStop(0.45, 'rgba(255,190,150,0.04)');
+  light.addColorStop(1,    'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, DISC_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = light;
+  ctx.fill();
 
   state.handles.forEach((h, i) => {
-    const dist = Math.hypot(h.x - CX, h.y - CY);
-
-    segments[i].setAttribute('d', buildRidgePath(CX, CY, dist, h.theta, innerR, NUM_PETALS));
-    handles[i].setAttribute('cx', h.x);
-    handles[i].setAttribute('cy', h.y);
-
-    const nextH = state.handles[(i + 1) % NUM_PETALS];
+    const thisDist = Math.hypot(h.x - CX, h.y - CY);
+    const nextH    = state.handles[(i + 1) % NUM_PETALS];
     const nextDist = Math.hypot(nextH.x - CX, nextH.y - CY);
-    const avgDist = (dist + nextDist) / 2;
     const midTheta = h.theta + Math.PI / NUM_PETALS;
-    creases[i].setAttribute('d', buildCreasePath(CX, CY, avgDist, midTheta, NUM_PETALS));
+    drawCrease(ctx, midTheta, (thisDist + nextDist) / 2, innerR);
   });
 
-  opening.setAttribute('r', innerR);
-  ring.setAttribute('r', innerR);
+  drawOpening(ctx, innerR);
 }
 
-// ─── Coordinate conversion ─────────────────────────────────────────────────────────────
-
-function clientToSVG(clientX, clientY) {
-  const svg = document.getElementById('butthole');
-  const pt = svg.createSVGPoint();
-  pt.x = clientX;
-  pt.y = clientY;
-  return pt.matrixTransform(svg.getScreenCTM().inverse());
+function clientToCanvas(clientX, clientY) {
+  const canvas = document.getElementById('butthole');
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (clientX - r.left)  * (400 / r.width),
+    y: (clientY - r.top)   * (400 / r.height),
+  };
 }
 
-// ─── Drag ────────────────────────────────────────────────────────────────────────────
+function nearestHandle(x, y) {
+  const dx   = x - CX, dy = y - CY;
+  const dist = Math.hypot(dx, dy);
+  if (dist < INNER_R_MIN * 0.6 || dist > MAX_RADIUS + 22) return -1;
+
+  const angle = Math.atan2(dy, dx);
+  let best = 0, bestDiff = Infinity;
+  state.handles.forEach((h, i) => {
+    let d = Math.abs(angle - h.theta);
+    if (d > Math.PI) d = 2 * Math.PI - d;
+    if (d < bestDiff) { bestDiff = d; best = i; }
+  });
+  return best;
+}
 
 function startDrag(index) {
   state.drag = { index };
-  document.querySelectorAll('.handle')[index].classList.add('dragging');
+  document.getElementById('butthole').style.cursor = 'grabbing';
 }
 
 function moveDrag(clientX, clientY) {
   if (!state.drag) return;
   const { index } = state.drag;
-  const svgPt = clientToSVG(clientX, clientY);
+  const pt    = clientToCanvas(clientX, clientY);
   const theta = state.handles[index].theta;
 
-  const projection = (svgPt.x - CX) * Math.cos(theta) + (svgPt.y - CY) * Math.sin(theta);
-  const dist = Math.max(REST_RADIUS, Math.min(MAX_RADIUS, projection));
+  const proj = (pt.x - CX) * Math.cos(theta) + (pt.y - CY) * Math.sin(theta);
+  const dist = Math.max(REST_RADIUS, Math.min(MAX_RADIUS, proj));
 
   state.handles[index].x = CX + Math.cos(theta) * dist;
   state.handles[index].y = CY + Math.sin(theta) * dist;
-  updateShape();
+  render();
 }
 
 function endDrag() {
   if (!state.drag) return;
-  document.querySelectorAll('.handle')[state.drag.index].classList.remove('dragging');
+  document.getElementById('butthole').style.cursor = 'grab';
   state.drag = null;
 }
 
-// ─── Shape metrics ────────────────────────────────────────────────────────────────
-
 function computeShapeMetrics() {
   const pulls = state.handles.map(h => {
-    const dist = Math.hypot(h.x - CX, h.y - CY);
-    return Math.max(0, Math.min(1, (dist - REST_RADIUS) / (MAX_RADIUS - REST_RADIUS)));
+    const d = Math.hypot(h.x - CX, h.y - CY);
+    return Math.max(0, Math.min(1, (d - REST_RADIUS) / (MAX_RADIUS - REST_RADIUS)));
   });
-
-  const avgPull = pulls.reduce((a, b) => a + b, 0) / NUM_PETALS;
-  const maxPull = Math.max(...pulls);
+  const avgPull  = pulls.reduce((a, b) => a + b, 0) / NUM_PETALS;
+  const maxPull  = Math.max(...pulls);
   const variance = pulls.reduce((s, d) => s + (d - avgPull) ** 2, 0) / NUM_PETALS;
   const asymmetry = Math.min(1, Math.sqrt(variance) * 3);
-  const tension = 1 - avgPull;
-
-  return { avgPull, maxPull, asymmetry, tension };
+  return { avgPull, maxPull, asymmetry, tension: 1 - avgPull };
 }
 
 function computeAudioFromShape({ avgPull, maxPull, asymmetry, tension }) {
   return {
-    filterFreq:   80 + tension * 220,
-    filterQ:       1.0 + asymmetry * 4.0,
-    lfoRate:      28 - avgPull * 16,
-    lfoDepth:      0.4 + asymmetry * 0.5,
-    masterVolume:  0.35 + avgPull * 0.55,
-    duration:      0.3 + avgPull * 1.4,
-    attackTime:    0.01 + (1 - maxPull) * 0.03,
+    filterFreq:  80  + tension   * 220,
+    filterQ:      1.0 + asymmetry * 4.0,
+    lfoRate:     28  - avgPull   * 16,
+    lfoDepth:     0.4 + asymmetry * 0.5,
+    masterVolume: 0.35 + avgPull  * 0.55,
+    duration:     0.3  + avgPull  * 1.4,
+    attackTime:   0.01 + (1 - maxPull) * 0.03,
   };
 }
-
-// ─── Audio engine ─────────────────────────────────────────────────────────────────
 
 function createBrownNoise(audioCtx, durationSeconds) {
   const sampleRate = audioCtx.sampleRate;
   const frameCount = Math.ceil(sampleRate * (durationSeconds + 0.3));
-  const buffer = audioCtx.createBuffer(1, frameCount, sampleRate);
-  const data = buffer.getChannelData(0);
+  const buffer     = audioCtx.createBuffer(1, frameCount, sampleRate);
+  const data       = buffer.getChannelData(0);
   let lastOut = 0;
   for (let i = 0; i < frameCount; i++) {
     const white = Math.random() * 2 - 1;
-    lastOut = (lastOut + 0.02 * white) / 1.02;
-    data[i] = lastOut * 3.5;
+    lastOut  = (lastOut + 0.02 * white) / 1.02;
+    data[i]  = lastOut * 3.5;
   }
   return buffer;
 }
 
 function createWaveShaperCurve(amount = 80) {
-  const n = 256;
+  const n     = 256;
   const curve = new Float32Array(n);
   for (let i = 0; i < n; i++) {
-    const x = (i * 2) / n - 1;
+    const x  = (i * 2) / n - 1;
     curve[i] = (Math.PI + amount) * x / (Math.PI + amount * Math.abs(x));
   }
   return curve;
@@ -215,7 +230,6 @@ function createWaveShaperCurve(amount = 80) {
 
 function playFart(surfacePreset = {}) {
   if (state.isPlaying) return;
-
   if (!state.audioCtx) {
     state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
@@ -223,7 +237,6 @@ function playFart(surfacePreset = {}) {
   if (ctx.state === 'suspended') ctx.resume();
 
   const params = { ...computeAudioFromShape(computeShapeMetrics()), ...surfacePreset };
-
   state.isPlaying = true;
   updatePlayButton();
 
@@ -240,16 +253,16 @@ function playFart(surfacePreset = {}) {
   noiseFilter.frequency.exponentialRampToValueAtTime(Math.max(20, filterFreq * 0.65), t0 + duration);
   noiseFilter.Q.value = filterQ;
 
-  const noiseGain = ctx.createGain();
+  const noiseGain  = ctx.createGain();
   noiseGain.gain.value = 0.5;
 
-  const buzzOsc = ctx.createOscillator();
-  buzzOsc.type = 'sawtooth';
+  const buzzOsc  = ctx.createOscillator();
+  buzzOsc.type   = 'sawtooth';
   buzzOsc.frequency.setValueAtTime(filterFreq * 0.65, t0);
   buzzOsc.frequency.exponentialRampToValueAtTime(Math.max(20, filterFreq * 0.45), t0 + duration);
 
   const buzzFilter = ctx.createBiquadFilter();
-  buzzFilter.type = 'bandpass';
+  buzzFilter.type  = 'bandpass';
   buzzFilter.frequency.setValueAtTime(filterFreq * 0.9, t0);
   buzzFilter.frequency.exponentialRampToValueAtTime(Math.max(20, filterFreq * 0.6), t0 + duration);
   buzzFilter.Q.value = filterQ * 0.7;
@@ -257,12 +270,12 @@ function playFart(surfacePreset = {}) {
   const buzzGain = ctx.createGain();
   buzzGain.gain.value = 0.35;
 
-  const waveshaper = ctx.createWaveShaper();
-  waveshaper.curve = createWaveShaperCurve(80);
+  const waveshaper   = ctx.createWaveShaper();
+  waveshaper.curve   = createWaveShaperCurve(80);
   waveshaper.oversample = '2x';
 
   const lfo = ctx.createOscillator();
-  lfo.type = 'sine';
+  lfo.type  = 'sine';
   lfo.frequency.value = lfoRate + (Math.random() * 4 - 2);
 
   const lfoDepthGain = ctx.createGain();
@@ -279,10 +292,10 @@ function playFart(surfacePreset = {}) {
 
   const compressor = ctx.createDynamicsCompressor();
   compressor.threshold.value = -8;
-  compressor.knee.value = 6;
-  compressor.ratio.value = 4;
-  compressor.attack.value = 0.001;
-  compressor.release.value = 0.1;
+  compressor.knee.value      = 6;
+  compressor.ratio.value     = 4;
+  compressor.attack.value    = 0.001;
+  compressor.release.value   = 0.1;
 
   const master = ctx.createGain();
   master.gain.value = masterVolume;
@@ -304,12 +317,9 @@ function playFart(surfacePreset = {}) {
   master.connect(compressor);
   compressor.connect(ctx.destination);
 
-  noiseSource.start(t0);
-  noiseSource.stop(t0 + duration + 0.15);
-  buzzOsc.start(t0);
-  buzzOsc.stop(t0 + duration + 0.15);
-  lfo.start(t0);
-  lfo.stop(t0 + duration + 0.15);
+  noiseSource.start(t0);  noiseSource.stop(t0 + duration + 0.15);
+  buzzOsc.start(t0);      buzzOsc.stop(t0 + duration + 0.15);
+  lfo.start(t0);          lfo.stop(t0 + duration + 0.15);
 
   noiseSource.onended = () => {
     state.isPlaying = false;
@@ -318,34 +328,23 @@ function playFart(surfacePreset = {}) {
   };
 }
 
-// ─── Reset animation ────────────────────────────────────────────────────────────────
-
 function resetAnimation() {
   if (state.resetTimer) clearInterval(state.resetTimer);
-
-  const startPositions = state.handles.map(h => ({ x: h.x, y: h.y }));
-  const steps = 30;
-  const totalMs = 450;
+  const start = state.handles.map(h => ({ x: h.x, y: h.y }));
+  const steps = 30, totalMs = 450;
   let step = 0;
 
   state.resetTimer = setInterval(() => {
     step++;
-    const t = step / steps;
-    const ease = 1 - Math.pow(1 - t, 3);
-
+    const ease = 1 - Math.pow(1 - step / steps, 3);
     state.handles.forEach((h, i) => {
-      const restX = CX + Math.cos(h.theta) * REST_RADIUS;
-      const restY = CY + Math.sin(h.theta) * REST_RADIUS;
-      h.x = startPositions[i].x + (restX - startPositions[i].x) * ease;
-      h.y = startPositions[i].y + (restY - startPositions[i].y) * ease;
+      const rx = CX + Math.cos(h.theta) * REST_RADIUS;
+      const ry = CY + Math.sin(h.theta) * REST_RADIUS;
+      h.x = start[i].x + (rx - start[i].x) * ease;
+      h.y = start[i].y + (ry - start[i].y) * ease;
     });
-
-    updateShape();
-
-    if (step >= steps) {
-      clearInterval(state.resetTimer);
-      state.resetTimer = null;
-    }
+    render();
+    if (step >= steps) { clearInterval(state.resetTimer); state.resetTimer = null; }
   }, totalMs / steps);
 }
 
@@ -353,32 +352,34 @@ function updatePlayButton() {
   document.getElementById('play-btn').classList.toggle('playing', state.isPlaying);
 }
 
-// ─── Init ────────────────────────────────────────────────────────────────────────────
-
 function init() {
+  const canvas = document.getElementById('butthole');
+  const dpr    = window.devicePixelRatio || 1;
+  canvas.width  = 400 * dpr;
+  canvas.height = 400 * dpr;
+  state.ctx = canvas.getContext('2d');
+  state.ctx.scale(dpr, dpr);
+
   initHandles();
-  updateShape();
+  render();
 
-  const svg = document.getElementById('butthole');
-
-  svg.addEventListener('pointerdown', e => {
-    const isHandle  = e.target.classList.contains('handle');
-    const isSegment = e.target.classList.contains('segment');
-    if (!isHandle && !isSegment) return;
+  canvas.addEventListener('pointerdown', e => {
     e.preventDefault();
-    const index = parseInt(e.target.dataset.index, 10);
-    e.target.setPointerCapture(e.pointerId);
+    const pt    = clientToCanvas(e.clientX, e.clientY);
+    const index = nearestHandle(pt.x, pt.y);
+    if (index < 0) return;
+    canvas.setPointerCapture(e.pointerId);
     startDrag(index);
   });
 
-  svg.addEventListener('pointermove', e => {
+  canvas.addEventListener('pointermove', e => {
     if (!state.drag) return;
     e.preventDefault();
     moveDrag(e.clientX, e.clientY);
   });
 
-  svg.addEventListener('pointerup',     () => endDrag());
-  svg.addEventListener('pointercancel', () => endDrag());
+  canvas.addEventListener('pointerup',     () => endDrag());
+  canvas.addEventListener('pointercancel', () => endDrag());
 
   document.getElementById('play-btn').addEventListener('click', () => playFart());
 }

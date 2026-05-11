@@ -4,9 +4,7 @@
   padding: 0;
 }
 
-html {
-  height: 100%;
-}
+html { height: 100%; }
 
 body {
   height: 100dvh;
@@ -28,31 +26,12 @@ body {
   width: min(65vw, 65vh);
   height: min(65vw, 65vh);
   touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
+  cursor: grab;
   display: block;
+  flex-shrink: 0;
 }
 
-.segment {
-  pointer-events: fill;
-  cursor: grab;
-}
-
-.segment:active {
-  cursor: grabbing;
-}
-
-.crease {
-  pointer-events: none;
-  fill: #1A0504;
-  opacity: 0.72;
-}
-
-.handle {
-  cursor: grab;
-}
-
-.handle.dragging {
+#butthole:active {
   cursor: grabbing;
 }
 
