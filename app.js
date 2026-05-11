@@ -2,10 +2,11 @@
 
 const CX = 200;
 const CY = 200;
-const REST_RADIUS = 52;
-const MAX_RADIUS = 130;
-const NUM_PETALS = 8;
-const PETAL_HALF_WIDTH = 16;
+const REST_RADIUS = 55;
+const MAX_RADIUS = 135;
+const NUM_PETALS = 12;
+const INNER_R_MIN = 16;
+const INNER_R_MAX = 38;
 
 const state = {
   handles: [],
@@ -26,52 +27,101 @@ function initHandles() {
   });
 }
 
-function buildPetalPath(cx, cy, tipX, tipY, halfWidth) {
-  const dx = tipX - cx;
-  const dy = tipY - cy;
-  const len = Math.hypot(dx, dy);
-  if (len < 1) return `M ${cx} ${cy} Z`;
+// ─── Geometry ──────────────────────────────────────────────────────────────────────────
 
-  const ux = dx / len;
-  const uy = dy / len;
-  const px = -uy;
-  const py = ux;
+// Rounded sector shape: narrow inner arc → two bowed sides → rounded outer arc.
+// 12 of these form a continuous ring of flesh folds.
+function buildRidgePath(cx, cy, dist, theta, innerR, N) {
+  const innerHalfAng = (Math.PI / N) * 0.75;
+  const outerHalfAng = (Math.PI / N) * 0.58;
 
-  const flare = halfWidth * 1.7;
-  const cp1x = cx + px * flare + ux * len * 0.25;
-  const cp1y = cy + py * flare + uy * len * 0.25;
-  const cp2x = tipX + px * halfWidth * 0.3;
-  const cp2y = tipY + py * halfWidth * 0.3;
-  const cp3x = tipX - px * halfWidth * 0.3;
-  const cp3y = tipY - py * halfWidth * 0.3;
-  const cp4x = cx - px * flare + ux * len * 0.25;
-  const cp4y = cy - py * flare + uy * len * 0.25;
+  const ia1 = theta - innerHalfAng;
+  const ia2 = theta + innerHalfAng;
+  const oa1 = theta - outerHalfAng;
+  const oa2 = theta + outerHalfAng;
+
+  const ix1 = cx + Math.cos(ia1) * innerR,  iy1 = cy + Math.sin(ia1) * innerR;
+  const ix2 = cx + Math.cos(ia2) * innerR,  iy2 = cy + Math.sin(ia2) * innerR;
+  const ox1 = cx + Math.cos(oa1) * dist,    oy1 = cy + Math.sin(oa1) * dist;
+  const ox2 = cx + Math.cos(oa2) * dist,    oy2 = cy + Math.sin(oa2) * dist;
+
+  const midR = (innerR + dist) * 0.52;
+  const mc1x = cx + Math.cos((ia1 + oa1) / 2 - 0.06) * midR;
+  const mc1y = cy + Math.sin((ia1 + oa1) / 2 - 0.06) * midR;
+  const mc2x = cx + Math.cos((ia2 + oa2) / 2 + 0.06) * midR;
+  const mc2y = cy + Math.sin((ia2 + oa2) / 2 + 0.06) * midR;
 
   return [
-    `M ${cx} ${cy}`,
-    `C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${tipX} ${tipY}`,
-    `C ${cp3x} ${cp3y} ${cp4x} ${cp4y} ${cx} ${cy}`,
+    `M ${ix1} ${iy1}`,
+    `A ${innerR} ${innerR} 0 0 1 ${ix2} ${iy2}`,
+    `Q ${mc2x} ${mc2y} ${ox2} ${oy2}`,
+    `A ${dist} ${dist} 0 0 0 ${ox1} ${oy1}`,
+    `Q ${mc1x} ${mc1y} ${ix1} ${iy1}`,
     'Z',
   ].join(' ');
 }
 
-function updateAllPetals() {
-  const petals = document.querySelectorAll('.petal');
-  const handles = document.querySelectorAll('.handle');
-  const wrinkles = document.querySelectorAll('.wrinkle');
+// Dark tapering valley between adjacent ridges.
+function buildCreasePath(cx, cy, dist, theta, N) {
+  const innerR = 8;
+  const innerW = 1.8;
+  const outerW = dist * 0.42 * (Math.PI / N);
+
+  const px = -Math.sin(theta);
+  const py =  Math.cos(theta);
+
+  const ix = cx + Math.cos(theta) * innerR;
+  const iy = cy + Math.sin(theta) * innerR;
+  const ox = cx + Math.cos(theta) * dist;
+  const oy = cy + Math.sin(theta) * dist;
+
+  const midR = (innerR + dist) * 0.5;
+  const midW = (innerW + outerW) * 0.5;
+  const mx = cx + Math.cos(theta) * midR;
+  const my = cy + Math.sin(theta) * midR;
+
+  return [
+    `M ${ix - px * innerW} ${iy - py * innerW}`,
+    `Q ${mx - px * midW} ${my - py * midW} ${ox - px * outerW} ${oy - py * outerW}`,
+    `A ${dist} ${dist} 0 0 1 ${ox + px * outerW} ${oy + py * outerW}`,
+    `Q ${mx + px * midW} ${my + py * midW} ${ix + px * innerW} ${iy + py * innerW}`,
+    'Z',
+  ].join(' ');
+}
+
+function updateShape() {
+  const segments = document.querySelectorAll('.segment');
+  const creases  = document.querySelectorAll('.crease');
+  const handles  = document.querySelectorAll('.handle');
+  const opening  = document.getElementById('center-opening');
+  const ring     = document.getElementById('inner-ring');
+
+  const pulls = state.handles.map(h => {
+    const d = Math.hypot(h.x - CX, h.y - CY);
+    return Math.max(0, Math.min(1, (d - REST_RADIUS) / (MAX_RADIUS - REST_RADIUS)));
+  });
+  const avgPull = pulls.reduce((a, b) => a + b, 0) / NUM_PETALS;
+  const innerR = INNER_R_MIN + avgPull * (INNER_R_MAX - INNER_R_MIN);
 
   state.handles.forEach((h, i) => {
-    petals[i].setAttribute('d', buildPetalPath(CX, CY, h.x, h.y, PETAL_HALF_WIDTH));
+    const dist = Math.hypot(h.x - CX, h.y - CY);
+
+    segments[i].setAttribute('d', buildRidgePath(CX, CY, dist, h.theta, innerR, NUM_PETALS));
     handles[i].setAttribute('cx', h.x);
     handles[i].setAttribute('cy', h.y);
 
+    const nextH = state.handles[(i + 1) % NUM_PETALS];
+    const nextDist = Math.hypot(nextH.x - CX, nextH.y - CY);
+    const avgDist = (dist + nextDist) / 2;
     const midTheta = h.theta + Math.PI / NUM_PETALS;
-    wrinkles[i].setAttribute('x1', CX + Math.cos(midTheta) * 15);
-    wrinkles[i].setAttribute('y1', CY + Math.sin(midTheta) * 15);
-    wrinkles[i].setAttribute('x2', CX + Math.cos(midTheta) * (REST_RADIUS * 0.88));
-    wrinkles[i].setAttribute('y2', CY + Math.sin(midTheta) * (REST_RADIUS * 0.88));
+    creases[i].setAttribute('d', buildCreasePath(CX, CY, avgDist, midTheta, NUM_PETALS));
   });
+
+  opening.setAttribute('r', innerR);
+  ring.setAttribute('r', innerR);
 }
+
+// ─── Coordinate conversion ─────────────────────────────────────────────────────────────
 
 function clientToSVG(clientX, clientY) {
   const svg = document.getElementById('butthole');
@@ -80,6 +130,8 @@ function clientToSVG(clientX, clientY) {
   pt.y = clientY;
   return pt.matrixTransform(svg.getScreenCTM().inverse());
 }
+
+// ─── Drag ────────────────────────────────────────────────────────────────────────────
 
 function startDrag(index) {
   state.drag = { index };
@@ -97,7 +149,7 @@ function moveDrag(clientX, clientY) {
 
   state.handles[index].x = CX + Math.cos(theta) * dist;
   state.handles[index].y = CY + Math.sin(theta) * dist;
-  updateAllPetals();
+  updateShape();
 }
 
 function endDrag() {
@@ -105,6 +157,8 @@ function endDrag() {
   document.querySelectorAll('.handle')[state.drag.index].classList.remove('dragging');
   state.drag = null;
 }
+
+// ─── Shape metrics ────────────────────────────────────────────────────────────────
 
 function computeShapeMetrics() {
   const pulls = state.handles.map(h => {
@@ -123,15 +177,17 @@ function computeShapeMetrics() {
 
 function computeAudioFromShape({ avgPull, maxPull, asymmetry, tension }) {
   return {
-    filterFreq: 80 + tension * 220,
-    filterQ: 1.0 + asymmetry * 4.0,
-    lfoRate: 28 - avgPull * 16,
-    lfoDepth: 0.4 + asymmetry * 0.5,
-    masterVolume: 0.35 + avgPull * 0.55,
-    duration: 0.3 + avgPull * 1.4,
-    attackTime: 0.01 + (1 - maxPull) * 0.03,
+    filterFreq:   80 + tension * 220,
+    filterQ:       1.0 + asymmetry * 4.0,
+    lfoRate:      28 - avgPull * 16,
+    lfoDepth:      0.4 + asymmetry * 0.5,
+    masterVolume:  0.35 + avgPull * 0.55,
+    duration:      0.3 + avgPull * 1.4,
+    attackTime:    0.01 + (1 - maxPull) * 0.03,
   };
 }
+
+// ─── Audio engine ─────────────────────────────────────────────────────────────────
 
 function createBrownNoise(audioCtx, durationSeconds) {
   const sampleRate = audioCtx.sampleRate;
@@ -262,6 +318,8 @@ function playFart(surfacePreset = {}) {
   };
 }
 
+// ─── Reset animation ────────────────────────────────────────────────────────────────
+
 function resetAnimation() {
   if (state.resetTimer) clearInterval(state.resetTimer);
 
@@ -282,7 +340,7 @@ function resetAnimation() {
       h.y = startPositions[i].y + (restY - startPositions[i].y) * ease;
     });
 
-    updateAllPetals();
+    updateShape();
 
     if (step >= steps) {
       clearInterval(state.resetTimer);
@@ -295,16 +353,18 @@ function updatePlayButton() {
   document.getElementById('play-btn').classList.toggle('playing', state.isPlaying);
 }
 
+// ─── Init ────────────────────────────────────────────────────────────────────────────
+
 function init() {
   initHandles();
-  updateAllPetals();
+  updateShape();
 
   const svg = document.getElementById('butthole');
 
   svg.addEventListener('pointerdown', e => {
-    const isHandle = e.target.classList.contains('handle');
-    const isPetal = e.target.classList.contains('petal');
-    if (!isHandle && !isPetal) return;
+    const isHandle  = e.target.classList.contains('handle');
+    const isSegment = e.target.classList.contains('segment');
+    if (!isHandle && !isSegment) return;
     e.preventDefault();
     const index = parseInt(e.target.dataset.index, 10);
     e.target.setPointerCapture(e.pointerId);
@@ -317,7 +377,7 @@ function init() {
     moveDrag(e.clientX, e.clientY);
   });
 
-  svg.addEventListener('pointerup', () => endDrag());
+  svg.addEventListener('pointerup',     () => endDrag());
   svg.addEventListener('pointercancel', () => endDrag());
 
   document.getElementById('play-btn').addEventListener('click', () => playFart());
